@@ -1,6 +1,7 @@
-const express = require('express');
-const cors = require('cors');
-const dotenv = require('dotenv');
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { generateResponse } from './services/ai.js';
 
 dotenv.config(); // load env variable
 
@@ -20,9 +21,21 @@ app.get('/', (req, res) => {
     });
 });
 
-// 2. dummy route to test later
-app.get('/api/test', (req, res) => {
-    res.json({ message: "if u see this the api is working" });
+app.post('/api/chat', async (req, res) => {
+    const { message } = req.body;
+    
+    if (!message) {
+        return res.status(400).json({ error: "message is required" });
+    }
+    try {
+        const aiReply = await generateResponse(message);
+        res.json({
+            reply: aiReply,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        res.status(500).json({ error: "AI generation failed" });
+    }
 });
 
 // start server
