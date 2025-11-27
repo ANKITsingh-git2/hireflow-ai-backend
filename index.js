@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { generateResponse } from './services/ai.js';
+import {addResumeToVectorDB, queryVectorDB} from './services/rag.js'
 
 dotenv.config(); // load env variable
 
@@ -36,6 +37,20 @@ app.post('/api/chat', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: "AI generation failed" });
     }
+});
+
+// test : feeding brain
+app.post('/api/test-memory-add', async (req, res) => {
+    const { text, candidateId } = req.body;
+    await addResumeToVectorDB(text, candidateId);
+  res.json({ success: true, message: "I have memorized this!" });
+})
+
+// test : ask the brain
+app.post('/api/test-memory-query', async (req, res) => {
+  const { question } = req.body;
+  const context = await queryVectorDB(question);
+  res.json({ contextFound: context });
 });
 
 // start server

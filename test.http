@@ -1,6 +1,4 @@
-POST http://localhost:5000/api/chat
+POST http://localhost:5000/api/test-memory-query
 Content-Type: application/json
 
-{
-  "message": "Explain to me like I am 5: What is a Vector Database?"
-}
+{ "question": "What is John's weakness?" }
