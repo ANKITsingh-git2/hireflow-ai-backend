@@ -1,13 +1,17 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import multer from 'multer';
 import { generateResponse } from './services/ai.js';
-import {addResumeToVectorDB, queryVectorDB} from './services/rag.js'
+import { addResumeToVectorDB, queryVectorDB } from './services/rag.js';
+import { extractTextFromPDF } from './services/pdf.js';
 
 dotenv.config(); // load env variable
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+const upload = multer({storage:multer.memoryStorage()})
 
 // middleware
 app.use(cors()); // allow frontend access
@@ -37,6 +41,38 @@ app.post('/api/chat', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: "AI generation failed" });
     }
+});
+
+app.post('/api/upload', upload.single('resume'), async (req, res) => {
+  try {
+    const { file } = req;
+    const { candidateId } = req.body;
+
+    if (!file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    console.log(`📄 Received file: ${file.originalname}`);
+
+    // 1. Convert PDF Buffer to Text
+    const text = await extractTextFromPDF(file.buffer);
+    console.log(`📝 Extracted ${text.length} characters`);
+
+    // 2. Save to Pinecone Memory
+    // Use the filename as candidateId if none provided
+    const id = candidateId || file.originalname; 
+    await addResumeToVectorDB(text, id);
+
+    res.json({ 
+      success: true, 
+      message: "Resume processed and stored in memory.",
+      id: id
+    });
+
+  } catch (error) {
+    console.error("Upload failed:", error);
+    res.status(500).json({ error: "Failed to process resume" });
+  }
 });
 
 // test : feeding brain
