@@ -63,7 +63,9 @@ export async function queryVectorDB(query) {
 
         // search 2 most relevent results
         const results = await vectorStore.similaritySearch(query, 2);
-
+        if (!results.length) {
+                return "No specific resume context found for this topic. Ask general technical questions.";
+             }
         // combine in single string
         return results.map(doc => doc.pageContent).join("\n\n");
     } catch (error) {

@@ -2,22 +2,30 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
+
+// Services
 import { generateResponse } from './services/ai.js';
 import { addResumeToVectorDB, queryVectorDB } from './services/rag.js';
 import { extractTextFromPDF } from './services/pdf.js';
 
-dotenv.config(); // load env variable
-
+// --- Configuration ---
+dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const upload = multer({storage:multer.memoryStorage()})
+// Configure Multer (Keep file in memory for immediate processing)
+const upload = multer({ storage: multer.memoryStorage() });
 
-// middleware
-app.use(cors()); // allow frontend access
-app.use(express.json());  // parse json bodies
+// --- Middleware ---
+app.use(cors());              // Allow Frontend access
+app.use(express.json());      // Parse JSON bodies
 
-//1. basic health check route , render checks to see if server is alive
+// --- Routes ---
+
+/**
+ * 1. Health Check
+ * Used by Render to verify the server is alive.
+ */
 app.get('/', (req, res) => {
     res.send({
         status: 'Active',
@@ -26,23 +34,12 @@ app.get('/', (req, res) => {
     });
 });
 
-app.post('/api/chat', async (req, res) => {
-    const { message } = req.body;
-    
-    if (!message) {
-        return res.status(400).json({ error: "message is required" });
-    }
-    try {
-        const aiReply = await generateResponse(message);
-        res.json({
-            reply: aiReply,
-            timestamp: new Date().toISOString()
-        });
-    } catch (error) {
-        res.status(500).json({ error: "AI generation failed" });
-    }
-});
-
+/**
+ * 2. Resume Upload
+ * - Accepts a PDF file
+ * - Extracts text
+ * - Stores embeddings in Pinecone
+ */
 app.post('/api/upload', upload.single('resume'), async (req, res) => {
   try {
     const { file } = req;
@@ -54,12 +51,12 @@ app.post('/api/upload', upload.single('resume'), async (req, res) => {
 
     console.log(`📄 Received file: ${file.originalname}`);
 
-    // 1. Convert PDF Buffer to Text
+    // Extract text from PDF
     const text = await extractTextFromPDF(file.buffer);
     console.log(`📝 Extracted ${text.length} characters`);
 
-    // 2. Save to Pinecone Memory
-    // Use the filename as candidateId if none provided
+    // Save to Vector DB
+    // Use filename as ID if candidateId is not provided
     const id = candidateId || file.originalname; 
     await addResumeToVectorDB(text, id);
 
@@ -75,21 +72,58 @@ app.post('/api/upload', upload.single('resume'), async (req, res) => {
   }
 });
 
-// test : feeding brain
-app.post('/api/test-memory-add', async (req, res) => {
-    const { text, candidateId } = req.body;
-    await addResumeToVectorDB(text, candidateId);
-  res.json({ success: true, message: "I have memorized this!" });
-})
+/**
+ * 3. AI Chat Interface (RAG Enabled)
+ * - Retrives resume context based on user query
+ * - Generates interview response using Groq
+ */
+app.post('/api/chat', async (req, res) => {
+  const { message } = req.body;
 
-// test : ask the brain
-app.post('/api/test-memory-query', async (req, res) => {
-  const { question } = req.body;
-  const context = await queryVectorDB(question);
-  res.json({ contextFound: context });
+  if (!message) {
+    return res.status(400).json({ error: "Message is required" });
+  }
+
+  try {
+    // A. Retrieve Context (RAG)
+    const context = await queryVectorDB(message);
+
+    // B. Construct System Prompt
+    const systemPrompt = `
+      You are an AI Technical Recruiter named "HireFlow".
+      
+      Your Goal: Conduct a technical screening interview for a Software Engineering role.
+      
+      CONTEXT FROM CANDIDATE'S RESUME:
+      "${context || "No specific resume context found. Ask general technical questions."}"
+      
+      INSTRUCTIONS:
+      1. Use the Context above to ask specific questions about their experience.
+      2. Keep your responses concise (max 2-3 sentences).
+      3. Be professional but conversational.
+      4. Do not reveal that you were given this context text directly.
+      5. If the candidate answers correctly, move to a harder topic.
+      
+      USER'S LATEST MESSAGE: "${message}"
+      
+      Generate the next interview question or response:
+    `;
+
+    // C. Generate Response
+    const aiReply = await generateResponse(systemPrompt);
+
+    res.json({ 
+      reply: aiReply,
+      contextUsed: context ? "Found relevant resume info" : "No context found" 
+    });
+
+  } catch (error) {
+    console.error("Chat Error:", error);
+    res.status(500).json({ error: "AI generation failed" });
+  }
 });
 
-// start server
+// --- Server Start ---
 app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
-})
+});
